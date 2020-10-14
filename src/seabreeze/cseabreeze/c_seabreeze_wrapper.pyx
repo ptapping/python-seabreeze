@@ -839,14 +839,64 @@ cdef class SeaBreezeSpectrometerFeature(SeaBreezeFeature):
         #                                        unsigned char *buffer, int bufferLength)
         raise NotImplementedError("unformatted spectrum")
 
-    def get_fast_buffer_spectrum(self):
-        # TODO: requires wrapping of OBP command GetRawSpectrumWithMetadata
-        #       which returns N raw spectra each with a 64 byte metadata prefix
-        # int spectrometerGetFastBufferSpectrum(long deviceID, long spectrometerFeatureID, int *errorCode,
-        #                                       unsigned char *dataBuffer, int dataMaxLength,
-        #                                       unsigned int numberOfSampleToRetrieve) # currently 15 max
-        raise NotImplementedError("Not yet supported via cseabreeze. Requires changes to libseabreeze.")
+    @cython.boundscheck(False)
+    def get_fast_buffer_spectrum(self, count=1):
+        """
+        Returns zero or more spectra currently in the spectrometer buffer.
 
+        The maximum number of spectra returned per call to this function is 15.
+        The blocking behaviour of this function changes depending on whether buffering
+        has been enabled or not.
+
+        If the buffer is disabled, this function will block until the requested number
+        of spectra are acquired.
+
+        If the buffer is enabled, this function will return up to the requested
+        number of spectra, depending on how many acquisitions are ready and available
+        in the buffer.
+        If there is no new data available, this will return zero spectra.
+
+        If averaging is enabled, then the count refers to the number of averaged spectra,
+        not the total number of spectra that went into the average.
+
+        Parameters
+        ----------
+        count : int
+            Maximum number of spectra to return.
+
+        Returns
+        -------
+        data_raw: `np.ndarray`
+            The raw data, including metadata, spectra and checksum.
+        """
+
+        cdef int error_code
+        cdef int bytes_written
+        cdef unsigned char[::1] out
+        cdef int out_length
+        cdef unsigned int n
+
+        # Bounds check number of requested spectra
+        # TODO: The OceanFX supports 15 spectra per call, is that the same for all devices?
+        if count is None: count = 1
+        n = max(1, min(15, int(count)))
+
+        # Maximum buffer size will be:
+        # 64 bytes metadata + 16 bit pixel data + 32 bit checksum
+        # for each of the n spectra
+        data_raw = np.zeros(n*(64 + self._spectrum_length * 2 + 4), dtype=np.ubyte)
+        out = data_raw
+        out_length = data_raw.size
+
+        with nogil:
+            bytes_written = self.sbapi.spectrometerGetFastBufferSpectrum(self.device_id, self.feature_id, &error_code,
+                                                                         &out[0], out_length, n)
+        if error_code != 0:
+            raise SeaBreezeError(error_code=error_code)
+
+        # For now, just return the raw byte data without any interpretation
+        # TODO: Unpack bytes into metadata, spectra etc.
+        return data_raw[:bytes_written]
 
 cdef class SeaBreezePixelBinningFeature(SeaBreezeFeature):
 
