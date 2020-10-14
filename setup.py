@@ -26,6 +26,10 @@ else:
 from distutils.sysconfig import customize_compiler
 from distutils.util import strtobool
 
+# Work around issue with PEP517 when using "pip install --user -e ."
+# See https://github.com/pypa/pip/issues/7953
+import site
+site.ENABLE_USER_SITE = True
 
 if "--without-cseabreeze" in sys.argv:
     # user requests to not install cython wrapper
